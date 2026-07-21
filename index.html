@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Chili‑Run 3D – Refinement</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #200000;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #ffd9a0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    #menu, #gameover {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(20, 0, 0, 0.9);
+      backdrop-filter: blur(5px);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-size: 32px;
+      z-index: 20;
+      text-align: center;
+    }
+
+    #menu h1, #gameover h1 {
+      color: #ff4444;
+      text-shadow: 0 0 15px #ff0000;
+      margin-bottom: 10px;
+      font-size: 48px;
+    }
+
+    .instructions {
+      font-size: 18px;
+      color: #aaa;
+      margin-bottom: 30px;
+    }
+
+    button {
+      padding: 15px 40px;
+      font-size: 24px;
+      margin-top: 20px;
+      background: #ff4444;
+      border: 2px solid #ff8888;
+      color: white;
+      cursor: pointer;
+      border-radius: 5px;
+      font-weight: bold;
+      transition: transform 0.1s, background 0.2s;
+    }
+
+    button:hover { background: #ff6666; }
+    button:active { transform: scale(0.95); }
+
+    #ui {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      font-size: 28px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px #000;
+    }
+
+    #ui span { color: #ff6666; }
+    
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- START-MENÜ -->
+  <div id="menu">
+    <h1>🌶️ CHILI‑RUN 3D 🌶️</h1>
+    <div class="instructions">
+      Pfeiltasten / A & D: Bewegen<br>
+      Leertaste / Pfeil Hoch: Springen<br>
+      (Auf Handy: Wischen zum Bewegen & Springen)
+    </div>
+    <button id="startBtn">Start</button>
+  </div>
+
+  <!-- GAME OVER SCREEN -->
+  <div id="gameover" class="hidden">
+    <h1>Verbrannt!</h1>
+    <div id="finalScore" class="instructions">Score: 0</div>
+    <button id="restartBtn">Neustart</button>
+  </div>
+
+  <!-- SCORE UI -->
+  <div id="ui" class="hidden">
+    SCORE: <span id="score">0</span>
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+
+  <script>
+    /* ---------------- SOUND ---------------- */
+    const snd = {
+      start: new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"),
+      jump: new Audio("https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"),
+      spawn: new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg"),
+      gameover: new Audio("https://actions.google.com/sounds/v1/cartoon/metal_twang.ogg"),
+      music: new Audio("https://actions.google.com/sounds/v1/ambiences/forest_day.ogg")
+    };
+
+    snd.music.loop = true;
+    snd.music.volume = 0.2;
+
+    /* ---------------- GAME VARIABLEN ---------------- */
+    let scene, camera, renderer;
+    let chili, floor;
+    let lane = 1; // 0: Links, 1: Mitte, 2: Rechts
+    const laneX = [-1.8, 0, 1.8];
+    
+    let speed = 0.15;
+    const baseSpeed = 0.15;
+    let maxSpeed = 0.4;
+    
+    let score = 0;
+    let jumping = false;
+    let jumpVel = 0;
+    const gravity = -0.025;
+    
+    let obstacles = [];
+    let spawnTimer = 0;
+    let gameRunning = false;
+    let clock;
+    let chiliBox, obsBox; // Für Kollision
+
+    // Cache für Geometrien und Materialien (Performance)
+    const cache = {
+      potGeo: new THREE.CylinderGeometry(0.6, 0.8, 1, 16),
+      potMat: new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 }),
+      bladeGeo: new THREE.BoxGeometry(0.15, 0.4, 1.5),
+      handleGeo: new THREE.BoxGeometry(0.3, 0.3, 0.5),
+      bladeMat: new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 }),
+      handleMat: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 }),
+      flameGeo: new THREE.SphereGeometry(0.6, 12, 12),
+      flameMat: new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff3300, emissiveIntensity: 1.5 })
+    };
+
+    /* ---------------- START & RESET ---------------- */
+    document.getElementById('startBtn').addEventListener('click', startGame);
+    document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+    function startGame() {
+      document.getElementById("menu").classList.add('hidden');
+      document.getElementById("ui").classList.remove('hidden');
+
+      snd.start.play();
+      snd.music.play();
+
+      init();
+      gameRunning = true;
+      clock = new THREE.Clock();
+      animate();
+    }
+
+    function restartGame() {
+      // Alle Hindernisse entfernen
+      obstacles.forEach(o => scene.remove(o));
+      obstacles = [];
+      
+      // Variablen zurücksetzen
+      score = 0;
+      speed = baseSpeed;
+      lane = 1;
+      jumping = false;
+      jumpVel = 0;
+      chili.position.set(0, 0.8, 0);
+      
+      document.getElementById("score").innerText = score;
+      document.getElementById("gameover").classList.add('hidden');
+      
+      snd.music.currentTime = 0;
+      snd.music.play();
+      
+      gameRunning = true;
+      animate();
+    }
+
+    /* ---------------- INITIALISIERUNG ---------------- */
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x220000);
+      scene.fog = new THREE.Fog(0x220000, 15, 45); // Nebel für Tiefe
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 4, 7);
+      camera.lookAt(0, 1, -5);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true; // Schatten aktivieren
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      // Lichtsetup
+      const hemi = new THREE.HemisphereLight(0xffe0c0, 0x110000, 0.6);
+      scene.add(hemi);
+      
+      const dir = new THREE.DirectionalLight(0xffaa66, 1.2);
+      dir.position.set(5, 15, 10);
+      dir.castShadow = true;
+      dir.shadow.mapSize.width = 1024;
+      dir.shadow.mapSize.height = 1024;
+      dir.shadow.camera.near = 0.5;
+      dir.shadow.camera.far = 50;
+      dir.shadow.camera.left = -10;
+      dir.shadow.camera.right = 10;
+      dir.shadow.camera.top = 10;
+      dir.shadow.camera.bottom = -10;
+      scene.add(dir);
+
+      // Boden mit Textur-Offset für Bewegungsgefühl
+      const floorTexture = createFloorTexture();
+      const floorGeo = new THREE.PlaneGeometry(10, 200);
+      const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.9 });
+      floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.z = -50;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // Chili Character
+      const chiliGeo = new THREE.CapsuleGeometry(0.4, 0.8, 4, 8);
+      const chiliMat = new THREE.MeshStandardMaterial({ 
+        color: 0xff2222, 
+        emissive: 0x440000, 
+        roughness: 0.4 
+      });
+      chili = new THREE.Mesh(chiliGeo, chiliMat);
+      chili.position.set(0, 0.8, 0);
+      chili.castShadow = true;
+      scene.add(chili);
+
+      // Kollisionsboxen
+      chiliBox = new THREE.Box3();
+      obsBox = new THREE.Box3();
+
+      // Steuerung
+      window.addEventListener("keydown", controls);
+      window.addEventListener('touchstart', handleTouchStart, {passive: false});
+      window.addEventListener('touchend', handleTouchEnd, {passive: false});
+      window.addEventListener("resize", resize);
+    }
+
+    // Erstellt ein einfaches Gitter-Muster für den Boden
+    function createFloorTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#331111';
+      ctx.fillRect(0, 0, 256, 256);
+      
+      ctx.strokeStyle = '#552222';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      for(let i=0; i<=256; i+=32) {
+          ctx.moveTo(i, 0); ctx.lineTo(i, 256);
+          ctx.moveTo(0, i); ctx.lineTo(256, i);
+      }
+      ctx.stroke();
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(2, 20);
+      return texture;
+    }
+
+    /* ---------------- STEUERUNG ---------------- */
+    function controls(e) {
+      if (!gameRunning) return;
+      if (e.code === "ArrowLeft" || e.code === "KeyA") moveLane(-1);
+      if (e.code === "ArrowRight" || e.code === "KeyD") moveLane(1);
+      if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") jump();
+    }
+
+    function moveLane(dir) {
+      lane = Math.max(0, Math.min(2, lane + dir));
+    }
+
+    function jump() {
+      if (!jumping) {
+        jumping = true;
+        jumpVel = 0.35;
+        snd.jump.play();
+      }
+    }
+
+    // Touch / Swipe Steuerung
+    let touchStartX = 0, touchStartY = 0;
+    function handleTouchStart(e) {
+      if (!gameRunning) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }
+    function handleTouchEnd(e) {
+      if (!gameRunning) return;
+      const touchEndX = e.changedTouches[0].clientX;
+      const touchEndY = e.changedTouches[0].clientY;
+      
+      const dx = touchEndX - touchStartX;
+      const dy = touchEndY - touchStartY;
+      
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+
+      if (Math.max(absX, absY) < 30) return; // Zu kurzer Wischer
+
+      if (absX > absY) {
+          // Horizontale Bewegung
+          if (dx > 0) moveLane(1); else moveLane(-1);
+      } else {
+          // Vertikale Bewegung
+          if (dy < 0) jump(); // Nach oben wischen = Springen
+      }
+    }
+
+    /* ---------------- HINDERNIS-ERSTELLUNG ---------------- */
+    function createPot() {
+      const mesh = new THREE.Mesh(cache.potGeo, cache.potMat);
+      mesh.castShadow = true;
+      mesh.position.y = 0.5;
+      return mesh;
+    }
+
+    function createKnife() {
+      const group = new THREE.Group();
+      const blade = new THREE.Mesh(cache.bladeGeo, cache.bladeMat);
+      blade.castShadow = true;
+      blade.position.y = 0.2; // Klinge liegt flach
+      const handle = new THREE.Mesh(cache.handleGeo, cache.handleMat);
+      handle.castShadow = true;
+      handle.position.set(0, 0.2, -1);
+      group.add(blade);
+      group.add(handle);
+      return group;
+    }
+
+    function createFlame() {
+      const mesh = new THREE.Mesh(cache.flameGeo, cache.flameMat);
+      mesh.castShadow = true;
+      mesh.position.y = 0.6;
+      mesh.userData.isFlame = true; // Für Animation
+      return mesh;
+    }
+
+    function spawnObstacle() {
+      const types = [createPot, createKnife, createFlame];
+      const type = types[Math.floor(Math.random() * types.length)];
+
+      // 30% Chance, 2 Hindernisse gleichzeitig zu spawnen (auf 2 Bahnen)
+      const numToSpawn = Math.random() > 0.7 ? 2 : 1;
+      const availableLanes = [0, 1, 2].sort(() => Math.random() - 0.5);
+
+      for(let i = 0; i < numToSpawn; i++) {
+        const mesh = type(); 
+        const laneIndex = availableLanes[i];
+        mesh.position.x = laneX[laneIndex];
+        mesh.position.z = -45;
+        
+        // Zufällige Rotation für optische Abwechslung
+        if (!mesh.userData.isFlame) {
+          mesh.rotation.y = Math.random() * Math.PI;
+        }
+        
+        scene.add(mesh);
+        obstacles.push(mesh);
+      }
+      snd.spawn.play();
+    }
+
+    /* ---------------- GAME OVER ---------------- */
+    function gameOver() {
+      gameRunning = false;
+      snd.music.pause();
+      snd.gameover.play();
+
+      document.getElementById("finalScore").innerText = "Score: " + score;
+      document.getElementById("gameover").classList.remove('hidden');
+    }
+
+    /* ---------------- ANIMATION ---------------- */
+    function animate() {
+      if (!gameRunning) return;
+      requestAnimationFrame(animate);
+      
+      const delta = clock.getDelta();
+      const frameSpeed = speed * (delta * 60); // Framerate-unabhängig
+
+      // Chili Bewegung (X-Achse sanft interpolieren)
+      const targetX = laneX[lane];
+      chili.position.x += (targetX - chili.position.x) * 0.2;
+
+      // Springen (Y-Achse)
+      if (jumping) {
+        chili.position.y += jumpVel;
+        jumpVel += gravity;
+        if (chili.position.y <= 0.8) {
+          chili.position.y = 0.8;
+          jumping = false;
+          jumpVel = 0;
+        }
+      }
+
+      // Chili leicht rotieren lassen beim Bewegen
+      chili.rotation.z = (targetX - chili.position.x) * 0.3;
+
+      // Boden scrollen (Textur verschieben)
+      if(floor.material.map) {
+        floor.material.map.offset.y -= frameSpeed * 0.1;
+      }
+
+      // Geschwindigkeit erhöhen
+      speed = Math.min(maxSpeed, baseSpeed + score * 0.0005);
+
+      // --- KOLLISIONSERKENNUNG ---
+      // Spieler-Box EINMAL pro Frame berechnen und verkleinern
+      chili.updateMatrixWorld(true);
+      chiliBox.setFromObject(chili);
+      chiliBox.expandByScalar(-0.15); 
+      
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const o = obstacles[i];
+        o.position.z += frameSpeed;
+
+        // Flamme hüpfen lassen
+        if (o.userData.isFlame) {
+          o.position.y = 0.6 + Math.sin(Date.now() * 0.01 + o.position.x) * 0.1;
+          o.scale.setScalar(1 + Math.sin(Date.now() * 0.015) * 0.1);
+        }
+
+        // Hindernis-Box berechnen
+        o.updateMatrixWorld(true);
+        obsBox.setFromObject(o);
+        obsBox.expandByScalar(-0.15);
+
+        // Auf Überlappung prüfen
+        if (chiliBox.intersectsBox(obsBox)) {
+          gameOver();
+          return;
+        }
+
+        // Aufräumen & Punkte
+        if (o.position.z > 7) {
+          scene.remove(o);
+          obstacles.splice(i, 1);
+          score += 10;
+          document.getElementById("score").innerText = score;
+        }
+      }
+
+      // Spawn Timer
+      spawnTimer += frameSpeed;
+      // Spawn-Rate passt sich der Geschwindigkeit an
+      if (spawnTimer > (5 - speed * 5)) {
+        spawnTimer = 0;
+        spawnObstacle();
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    /* ---------------- RESIZE ---------------- */
+    function resize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+  </script>
+</body>
+</html>
