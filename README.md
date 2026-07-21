@@ -1,6 +1,4 @@
-Hier ist eine vollständig formatierte `README.md`, die du direkt für dein GitHub-Repository kopieren und einfügen kannst. Sie ist professionell, übersichtlich gestaltet und enthält alle wichtigen Informationen zu dem Spiel.
 
-***
 
 ```markdown
 # 🌶️ Chili-Run 3D 🔥
@@ -87,8 +85,4 @@ Dieses Projekt ist Open Source und steht unter der [MIT-Lizenz](LICENSE). Du dar
 *Sounds courtesy of the Google Action Sounds Library.*
 ```
 
-### Wie du das benutzt:
-1. Erstelle in deinem GitHub-Repository eine Datei namens `README.md`.
-2. Kopiere den gesamten Text oben hinein.
-3. Ersetze `DEIN_USERNAME` im Installations-Teil durch deinen tatsächlichen GitHub-Namen.
-4. (Optional) Mache ein kurzes Video oder einen Screenshot von deinem Spiel und ersetze den Platzhalter-Link ganz oben durch dein eigenes Bild (z.B. `![Screenshot](./screenshot.png)` – lade dazu das Bild einfach in dein Repo hoch).
+
