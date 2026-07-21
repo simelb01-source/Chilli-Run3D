@@ -8,7 +8,7 @@ Ein flottes, endloses 3D-Runner-Spiel, das komplett im Browser läuft. Steuere e
 Dieses Projekt wurde mit **Three.js** und reinem Vanilla-JavaScript (ohne Build-Tools) umgesetzt.
 
 ![Chili-Run 3D Banner](https://via.placeholder.com/800x400/200000/ff4444?text=Chili-Run+3D) 
-*(Tipp: Hier kannst du später ein echtes Screenshot oder GIF einfügen)*
+<img width="538" height="462" alt="image" src="https://github.com/user-attachments/assets/18051de3-6e50-45dc-88a3-fac91c53ab92" />
 
 ---
 
